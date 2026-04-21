@@ -40,6 +40,21 @@ open_lib = False
 open_lib_lock = Lock()
 
 
+def _build_canfd_payload(msg: can.Message):
+    payload_length = msg.dlc
+    if payload_length < 0:
+        raise ValueError("CAN FD消息长度不能为负数")
+    if payload_length > 64:
+        raise ValueError("CAN FD消息长度不能超过64字节")
+
+    payload = bytearray(msg.data[:payload_length])
+    fd_dlc = can.util.len2dlc(payload_length)
+    frame_length = can.util.dlc2len(fd_dlc)
+    if len(payload) < frame_length:
+        payload.extend(b"\x00" * (frame_length - len(payload)))
+    return payload, fd_dlc
+
+
 def _format_ts_error(code: int) -> str:
     try:
         description = TSMasterApi.tsapp_get_error_description(code)
@@ -302,11 +317,10 @@ class TSMasterApiBus(BusABC):
             else:
                 FDmsg.FProperties = FDmsg.FProperties & (~0x04)
             FDmsg.FIdentifier = msg.arbitration_id
-            FData0 = bytearray(msg.data)
-            len_FData0 = len(FData0)
-            for i in range(len_FData0):
-                FDmsg.FData[i] = FData0[i]
-            FDmsg.FDLC = BYTE_LEN2DLC[len_FData0]
+            FData0, fd_dlc = _build_canfd_payload(msg)
+            for i, data_byte in enumerate(FData0):
+                FDmsg.FData[i] = data_byte
+            FDmsg.FDLC = fd_dlc
             FDmsg.FIdxChn = 0
             if msg.is_remote_frame:
                 FDmsg.FProperties = FDmsg.FProperties | 0x02
